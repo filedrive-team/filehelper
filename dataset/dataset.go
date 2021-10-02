@@ -72,13 +72,14 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 	}
 
 	var total_files = 0
-	var record_count = 0
 	go func() {
-		filepath.Walk(target, func(_ string, _ os.FileInfo, err error) error {
+		filepath.Walk(target, func(_ string, fi os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			total_files += 1
+			if !fi.IsDir() && fi.Name() != record_json {
+				total_files += 1
+			}
 			return nil
 		})
 	}()
@@ -88,7 +89,6 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 	for item := range files {
 		// ignore record_json
 		if item.Name == record_json {
-			record_count += 1
 			continue
 		}
 
@@ -108,8 +108,8 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 			Size: item.Info.Size(),
 			CID:  fileNode.Cid().String(),
 		}
-		if total_files-record_count > 0 {
-			fmt.Printf("total %d files, imported %d files, %.2f %%\n", total_files-record_count, len(records), float64(len(records))/float64(total_files-record_count)*100)
+		if total_files > 0 {
+			fmt.Printf("total %d files, imported %d files, %.2f %%\n", total_files, len(records), float64(len(records))/float64(total_files)*100)
 		}
 	}
 	err = saveRecords(records, recordPath)
