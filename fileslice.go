@@ -15,6 +15,16 @@ type FileSlice struct {
 	fileSize int64
 }
 
+func NewFileSlice(r *os.File, offset, start, end, fileSize int64) *FileSlice {
+	return &FileSlice{
+		r:        r,
+		offset:   offset,
+		start:    start,
+		end:      end,
+		fileSize: fileSize,
+	}
+}
+
 func (fs *FileSlice) Read(p []byte) (n int, err error) {
 	if fs.end == 0 {
 		fs.end = fs.fileSize - 1
