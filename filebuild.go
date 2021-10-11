@@ -6,6 +6,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	chunker "github.com/ipfs/go-ipfs-chunker"
+	"github.com/ipfs/go-merkledag"
 	"github.com/ipfs/go-unixfs/importer/balanced"
 	ihelper "github.com/ipfs/go-unixfs/importer/helpers"
 
@@ -41,6 +42,30 @@ func BuildFileNode(item Finfo, bufDs ipld.DAGService, cidBuilder cid.Builder) (n
 		NoCopy:     false,
 	}
 	db, err := params.New(chunker.NewSizeSplitter(r, int64(UnixfsChunkSize)))
+	if err != nil {
+		return nil, err
+	}
+	node, err = balanced.Layout(db)
+	if err != nil {
+		return nil, err
+	}
+	return
+}
+
+// BuildFileNodeV0 - build ipld with cid v0
+func BuildFileNodeV0(f *os.File, bufDs ipld.DAGService) (node ipld.Node, err error) {
+	cidBuilder, err := merkledag.PrefixForCidVersion(0)
+	if err != nil {
+		return
+	}
+	params := ihelper.DagBuilderParams{
+		Maxlinks:   UnixfsLinksPerLevel,
+		RawLeaves:  false,
+		CidBuilder: cidBuilder,
+		Dagserv:    bufDs,
+		NoCopy:     false,
+	}
+	db, err := params.New(chunker.NewSizeSplitter(f, int64(UnixfsChunkSize)))
 	if err != nil {
 		return nil, err
 	}
