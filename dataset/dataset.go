@@ -36,7 +36,7 @@ type MetaData struct {
 	CID  string `json:"cid"`
 }
 
-var log = logging.Logger("graphsplit/dataset")
+var log = logging.Logger("filehelper/dataset")
 
 func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWait int, parallel int) error {
 	recordPath := path.Join(target, record_json)
