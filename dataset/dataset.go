@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/filedrive-team/filehelper"
@@ -37,7 +38,7 @@ type MetaData struct {
 
 var log = logging.Logger("graphsplit/dataset")
 
-func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWait int) error {
+func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWait int, parallel int) error {
 	recordPath := path.Join(target, record_json)
 	// check if record.json has data
 	records, err := readRecords(recordPath)
@@ -84,34 +85,51 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 		})
 	}()
 
+	pchan := make(chan struct{}, parallel)
+	wg := sync.WaitGroup{}
+	lock := sync.RWMutex{}
 	var ferr error
 	files := filehelper.FileWalkAsync([]string{target})
 	for item := range files {
-		// ignore record_json
-		if item.Name == record_json {
-			continue
-		}
+		wg.Add(1)
+		go func(item filehelper.Finfo) {
+			defer func() {
+				<-pchan
+				wg.Done()
+			}()
+			pchan <- struct{}{}
+			// ignore record_json
+			if item.Name == record_json {
+				return
+			}
 
-		// ignore file which has been imported
-		if _, ok := records[item.Path]; ok {
-			continue
-		}
+			// ignore file which has been imported
+			lock.RLock()
+			if _, ok := records[item.Path]; ok {
+				lock.RUnlock()
+				return
+			}
+			lock.RUnlock()
 
-		fileNode, err := buildFileNodeRetry(retry, retryWait, item, dagServ, cidBuilder)
-		if err != nil {
-			ferr = err
-			break
-		}
-		records[item.Path] = &MetaData{
-			Path: item.Path,
-			Name: item.Name,
-			Size: item.Info.Size(),
-			CID:  fileNode.Cid().String(),
-		}
-		if total_files > 0 {
-			fmt.Printf("total %d files, imported %d files, %.2f %%\n", total_files, len(records), float64(len(records))/float64(total_files)*100)
-		}
+			fileNode, err := buildFileNodeRetry(retry, retryWait, item, dagServ, cidBuilder)
+			if err != nil {
+				ferr = err
+				return
+			}
+			lock.Lock()
+			defer lock.Unlock()
+			records[item.Path] = &MetaData{
+				Path: item.Path,
+				Name: item.Name,
+				Size: item.Info.Size(),
+				CID:  fileNode.Cid().String(),
+			}
+			if total_files > 0 {
+				fmt.Printf("total %d files, imported %d files, %.2f %%\n", total_files, len(records), float64(len(records))/float64(total_files)*100)
+			}
+		}(item)
 	}
+	wg.Wait()
 	err = saveRecords(records, recordPath)
 	if err != nil {
 		ferr = err
