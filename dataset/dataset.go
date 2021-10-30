@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/filedrive-team/filehelper"
+	"github.com/filedrive-team/filehelper/blockstore"
 	"github.com/filedrive-team/go-ds-cluster/clusterclient"
 	clustercfg "github.com/filedrive-team/go-ds-cluster/config"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dsmount "github.com/ipfs/go-datastore/mount"
-	dss "github.com/ipfs/go-datastore/sync"
 	bstore "github.com/ipfs/go-ipfs-blockstore"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	ipld "github.com/ipfs/go-ipld-format"
@@ -63,8 +63,9 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 		},
 	})
 
-	bs2 := bstore.NewBlockstore(dss.MutexWrap(ds))
-	dagServ := merkledag.NewDAGService(blockservice.New(bs2, offline.Exchange(bs2)))
+	bs := bstore.NewBlockstore(ds.(*dsmount.Datastore))
+	bs = blockstore.NewParaBlockstore(bs, parallel*5)
+	dagServ := merkledag.NewDAGService(blockservice.New(bs, offline.Exchange(bs)))
 
 	// cidbuilder
 	cidBuilder, err := merkledag.PrefixForCidVersion(0)
