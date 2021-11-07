@@ -75,3 +75,22 @@ func BuildFileNodeV0(f *os.File, bufDs ipld.DAGService) (node ipld.Node, err err
 	}
 	return
 }
+
+func BalanceNode(f io.Reader, bufDs ipld.DAGService, cidBuilder cid.Builder) (node ipld.Node, err error) {
+	params := ihelper.DagBuilderParams{
+		Maxlinks:   UnixfsLinksPerLevel,
+		RawLeaves:  false,
+		CidBuilder: cidBuilder,
+		Dagserv:    bufDs,
+		NoCopy:     false,
+	}
+	db, err := params.New(chunker.NewSizeSplitter(f, int64(UnixfsChunkSize)))
+	if err != nil {
+		return nil, err
+	}
+	node, err = balanced.Layout(db)
+	if err != nil {
+		return nil, err
+	}
+	return
+}
