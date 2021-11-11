@@ -4,16 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/filedrive-team/filehelper"
-	"github.com/filedrive-team/filehelper/blockstore"
+	"github.com/filedrive-team/filehelper/importer"
 	"github.com/filedrive-team/go-ds-cluster/clusterclient"
 	clustercfg "github.com/filedrive-team/go-ds-cluster/config"
 	"github.com/ipfs/go-blockservice"
@@ -38,7 +36,7 @@ type MetaData struct {
 
 var log = logging.Logger("filehelper/dataset")
 
-func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWait int, parallel, batchReadNum int) error {
+func Import(ctx context.Context, target, dsclusterCfg string, parallel, batchReadNum int) error {
 	recordPath := path.Join(target, record_json)
 	// check if record.json has data
 	records, err := readRecords(recordPath)
@@ -64,7 +62,7 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 	})
 
 	bs := bstore.NewBlockstore(ds.(*dsmount.Datastore))
-	bs = blockstore.NewParaBlockstore(bs, parallel*5)
+	//bs = blockstore.NewParaBlockstore(bs, parallel*5)
 	dagServ := merkledag.NewDAGService(blockservice.New(bs, offline.Exchange(bs)))
 
 	// cidbuilder
@@ -112,7 +110,7 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 			}
 			lock.RUnlock()
 
-			fileNode, err := buildFileNodeRetry(retry, retryWait, item, dagServ, cidBuilder)
+			fileNodeCid, err := buildFileNode(ctx, item, dagServ, cidBuilder, batchReadNum)
 			if err != nil {
 				ferr = err
 				return
@@ -123,7 +121,7 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 				Path: item.Path,
 				Name: item.Name,
 				Size: item.Info.Size(),
-				CID:  fileNode.Cid().String(),
+				CID:  fileNodeCid.String(),
 			}
 			if total_files > 0 {
 				fmt.Printf("total %d files, imported %d files, %.2f %%\n", total_files, len(records), float64(len(records))/float64(total_files)*100)
@@ -138,19 +136,20 @@ func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWa
 	return ferr
 }
 
-func buildFileNodeRetry(times, waitTime int, item filehelper.Finfo, dagServ ipld.DAGService, cidBuilder cid.Builder) (root ipld.Node, err error) {
-	for i := 0; i <= times; i++ {
-		log.Infof("import file: %s, try times: %d", item.Path, i)
-		if root, err = filehelper.BuildFileNode(item, dagServ, cidBuilder); err == nil {
-			return root, nil
-		}
-		// should wait a second if io.EOF
-		if err == io.EOF {
-			log.Infof("io.EOF wait %d seconds", waitTime)
-			time.Sleep(time.Duration(waitTime * 1e9))
-		}
+func buildFileNode(ctx context.Context, item filehelper.Finfo, dagServ ipld.DAGService, cidBuilder cid.Builder, batchReadNum int) (root cid.Cid, err error) {
+	f, err := os.Open(item.Path)
+	if err != nil {
+		return cid.Undef, err
 	}
-	return
+	defer f.Close()
+	log.Infof("import file: %s", item.Path)
+	rootcid, err := importer.BalanceNode(ctx, f, item.Info.Size(), dagServ, cidBuilder, batchReadNum)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	return rootcid, nil
+
 }
 
 func readRecords(path string) (map[string]*MetaData, error) {
