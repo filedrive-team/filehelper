@@ -38,7 +38,7 @@ type MetaData struct {
 
 var log = logging.Logger("filehelper/dataset")
 
-func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWait int, parallel int) error {
+func Import(ctx context.Context, target, dsclusterCfg string, retry int, retryWait int, parallel, batchReadNum int) error {
 	recordPath := path.Join(target, record_json)
 	// check if record.json has data
 	records, err := readRecords(recordPath)
