@@ -2,7 +2,6 @@ package importer
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"sync"
@@ -194,7 +193,7 @@ func BalanceNode(ctx context.Context, f io.Reader, fsize int64, bufDs format.DAG
 			for _, idxbuf := range rd {
 				go func(ib *Idxbuf) {
 					defer wg.Done()
-					fmt.Printf("id: %d, size: %d\n", ib.Idx, len(ib.Buf))
+					//fmt.Printf("id: %d, size: %d\n", ib.Idx, len(ib.Buf))
 					dag, err := NewDagWithData(ib.Buf, pb.Data_File, cidBuilder)
 					if err != nil {
 						errchan <- err
