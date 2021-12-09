@@ -168,6 +168,9 @@ func buildCidByLinks(ctx context.Context, links []*linkAndSize, dagServ format.D
 // Todos:
 //  read more bytes and parallel the dags save work
 func BalanceNode(ctx context.Context, f io.Reader, fsize int64, bufDs format.DAGService, cidBuilder cid.Builder, batchReadNum int) (cid.Cid, error) {
+	if fsize == 0 {
+		return cid.Undef, xerrors.Errorf("file size should not be zero")
+	}
 	cker := NewBatchSplitter(f, int64(UnixfsChunkSize), batchReadNum)
 	dataLinks := make([]*linkAndSize, dataLinkNum(fsize, int64(UnixfsChunkSize)))
 	errchan := make(chan error)

@@ -77,6 +77,9 @@ func Import(ctx context.Context, target, dsclusterCfg string, parallel, batchRea
 			if err != nil {
 				return err
 			}
+			if fi.Size() == 0 {
+				return nil
+			}
 			if !fi.IsDir() && fi.Name() != record_json {
 				total_files += 1
 			}
@@ -98,7 +101,7 @@ func Import(ctx context.Context, target, dsclusterCfg string, parallel, batchRea
 			}()
 			pchan <- struct{}{}
 			// ignore record_json
-			if item.Name == record_json {
+			if item.Name == record_json || item.Info.Size() == 0 {
 				return
 			}
 
