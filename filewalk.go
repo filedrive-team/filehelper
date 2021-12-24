@@ -7,6 +7,52 @@ import (
 	"strings"
 )
 
+func FileWalkAsyncWithIgnore(args []string, ignore []string) chan Finfo {
+	fichan := make(chan Finfo)
+	go func() {
+		defer close(fichan)
+		for _, path := range args {
+			finfo, err := os.Stat(path)
+			if err != nil {
+				return
+			}
+			if shouldIgnore(finfo.Name(), ignore) {
+				continue
+			}
+			// 忽略隐藏目录
+			if strings.HasPrefix(finfo.Name(), ".") {
+				continue
+			}
+			if finfo.IsDir() {
+				files, err := ioutil.ReadDir(path)
+				if err != nil {
+					return
+				}
+				templist := make([]string, 0)
+				for _, n := range files {
+					templist = append(templist, fmt.Sprintf("%s/%s", path, n.Name()))
+				}
+				embededChan := FileWalkAsyncWithIgnore(templist, ignore)
+				if err != nil {
+					return
+				}
+
+				for item := range embededChan {
+					fichan <- item
+				}
+			} else {
+				fichan <- Finfo{
+					Path: path,
+					Name: finfo.Name(),
+					Info: finfo,
+				}
+			}
+		}
+	}()
+
+	return fichan
+}
+
 func FileWalkAsync(args []string) chan Finfo {
 	fichan := make(chan Finfo)
 	go func() {
@@ -81,4 +127,13 @@ func FileWalkSync(args []string) (fileList []string, err error) {
 	}
 
 	return
+}
+
+func shouldIgnore(str string, blacklist []string) bool {
+	for _, item := range blacklist {
+		if item == str {
+			return true
+		}
+	}
+	return false
 }
