@@ -24,7 +24,7 @@ func (nr NullReader) Read(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func PadCar(targetPath string) error {
+func PadCarFile(targetPath string) error {
 	f, err := os.OpenFile(targetPath, os.O_RDWR, 0644)
 	if err != nil {
 		return err
@@ -44,11 +44,10 @@ func PadCar(targetPath string) error {
 	if int64(pieceSize) == carSize {
 		return nil
 	}
-	nr := io.LimitReader(NullReader{}, int64(pieceSize)-carSize)
 	if _, err := f.Seek(carSize, 0); err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, nr); err != nil {
+	if err = PadCar(f, carSize); err != nil {
 		return err
 	}
 	defer func() {
@@ -63,7 +62,21 @@ func PadCar(targetPath string) error {
 	return nil
 }
 
-func UnpadCar(targetPath string) error {
+func PadCar(w io.Writer, carSize int64) error {
+	pieceSize := padreader.PaddedSize(uint64(carSize))
+	if int64(pieceSize) == carSize {
+		return nil
+	}
+	nr := io.LimitReader(NullReader{}, int64(pieceSize)-carSize)
+
+	if _, err := io.Copy(w, nr); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func UnpadCarFile(targetPath string) error {
 	f, err := os.OpenFile(targetPath, os.O_RDWR, 0644)
 	if err != nil {
 		return err
