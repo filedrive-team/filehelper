@@ -4,6 +4,7 @@ package carv1
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -29,48 +30,60 @@ func NewBatch(ctx context.Context, bs blockstore.Blockstore) *BatchBuilder {
 	}
 }
 
-func (b *BatchBuilder) WriteCar(root cid.Cid, outPath string, batchNum int) error {
-	nd, err := GetNode(b.ctx, root, b.bs)
-	if err != nil {
-		return err
-	}
-
+func (b *BatchBuilder) WriteToFile(root cid.Cid, outPath string, batchNum int) error {
 	f, err := os.Create(outPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	// write header
-	if err := gocar.WriteHeader(&gocar.CarHeader{
+
+	_, err = b.Write(root, f, batchNum)
+	return err
+}
+
+func (b *BatchBuilder) Write(root cid.Cid, w io.Writer, batchNum int) (uint64, error) {
+	nd, err := GetNode(b.ctx, root, b.bs)
+	if err != nil {
+		return 0, err
+	}
+	w = &sw{w: w}
+	var carSize uint64
+	h := &gocar.CarHeader{
 		Roots:   []cid.Cid{root},
 		Version: 1,
-	}, f); err != nil {
-		return err
+	}
+
+	// write header
+	if err := gocar.WriteHeader(h, w); err != nil {
+		return 0, err
+	}
+	if hz, err := gocar.HeaderSize(h); err != nil {
+		return 0, err
+	} else {
+		carSize += hz
 	}
 
 	// write data
 	// write root node
-	if err := carutil.LdWrite(f, nd.Cid().Bytes(), nd.RawData()); err != nil {
-		return err
+	if err := carutil.LdWrite(w, nd.Cid().Bytes(), nd.RawData()); err != nil {
+		return 0, err
 	}
+	carSize += carutil.LdSize(nd.Cid().Bytes(), nd.RawData())
 	//fmt.Printf("cid: %s\n", nd.Cid())
 	if err := BlockWalk(b.ctx, nd, b.bs, batchNum, func(node format.Node) error {
-		if err := carutil.LdWrite(f, node.Cid().Bytes(), node.RawData()); err != nil {
+		if err := carutil.LdWrite(w, node.Cid().Bytes(), node.RawData()); err != nil {
 			return err
 		}
+		carSize += carutil.LdSize(nd.Cid().Bytes(), nd.RawData())
 		//fmt.Printf("cid: %s\n", node.Cid())
 		return nil
 	}); err != nil {
-		return err
+		return 0, err
 	}
-	finfo, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	carSize := finfo.Size()
-	fmt.Printf("car file size: %d\n", carSize)
 
-	return nil
+	fmt.Printf("car file size: %d, write size: %d\n", carSize, w.(*sw).N())
+
+	return carSize, nil
 }
 
 func GetNode(ctx context.Context, cid cid.Cid, bs blockstore.Blockstore) (format.Node, error) {
@@ -118,4 +131,21 @@ func BlockWalk(ctx context.Context, node format.Node, bs blockstore.Blockstore, 
 		}
 	}
 	return nil
+}
+
+type sw struct {
+	w io.Writer
+	n uint64
+}
+
+func (w *sw) Write(p []byte) (n int, err error) {
+	n, err = w.w.Write(p)
+	if err == nil {
+		w.n += uint64(n)
+	}
+	return
+}
+
+func (w *sw) N() uint64 {
+	return w.n
 }
