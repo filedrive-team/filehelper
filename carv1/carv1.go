@@ -20,10 +20,10 @@ import (
 
 type BatchBuilder struct {
 	ctx context.Context
-	bs  blockstore.Blockstore
+	bs  format.NodeGetter
 }
 
-func NewBatch(ctx context.Context, bs blockstore.Blockstore) *BatchBuilder {
+func NewBatch(ctx context.Context, bs format.NodeGetter) *BatchBuilder {
 	return &BatchBuilder{
 		ctx: ctx,
 		bs:  bs,
@@ -42,7 +42,7 @@ func (b *BatchBuilder) WriteToFile(root cid.Cid, outPath string, batchNum int) e
 }
 
 func (b *BatchBuilder) Write(root cid.Cid, w io.Writer, batchNum int) (uint64, error) {
-	nd, err := GetNode(b.ctx, root, b.bs)
+	nd, err := b.bs.Get(b.ctx, root)
 	if err != nil {
 		return 0, err
 	}
@@ -102,7 +102,7 @@ func GetNode(ctx context.Context, cid cid.Cid, bs blockstore.Blockstore) (format
 	return legacy.DecodeNode(ctx, nd)
 }
 
-func BlockWalk(ctx context.Context, node format.Node, bs blockstore.Blockstore, batchNum int, cb func(nd format.Node) error) error {
+func BlockWalk(ctx context.Context, node format.Node, bs format.NodeGetter, batchNum int, cb func(nd format.Node) error) error {
 	links := node.Links()
 	if len(links) == 0 {
 		return nil
@@ -113,13 +113,13 @@ func BlockWalk(ctx context.Context, node format.Node, bs blockstore.Blockstore, 
 	batchchan := make(chan struct{}, batchNum)
 	wg.Add(len(links))
 	for i, link := range links {
-		go func(ctx context.Context, i int, link *format.Link, bs blockstore.Blockstore) {
+		go func(ctx context.Context, i int, link *format.Link, bs format.NodeGetter) {
 			defer func() {
 				<-batchchan
 				wg.Done()
 			}()
 			batchchan <- struct{}{}
-			nd, err := GetNode(ctx, link.Cid, bs)
+			nd, err := bs.Get(ctx, link.Cid)
 			if err != nil {
 				errmsg = append(errmsg, err.Error())
 			}
