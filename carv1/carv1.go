@@ -82,7 +82,7 @@ func (b *BatchBuilder) Write(root cid.Cid, w io.Writer, batchNum int) (uint64, e
 			return err
 		}
 		cidSet.Add(node.Cid())
-		carSize += carutil.LdSize(nd.Cid().Bytes(), nd.RawData())
+		carSize += carutil.LdSize(node.Cid().Bytes(), node.RawData())
 		//fmt.Printf("cid: %s\n", node.Cid())
 		return nil
 	}); err != nil {
