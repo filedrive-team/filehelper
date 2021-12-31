@@ -63,6 +63,10 @@ func (b *BatchBuilder) Write(root cid.Cid, w io.Writer, batchNum int) (uint64, e
 		carSize += hz
 	}
 
+	// set cid set to only save uniq cid to car file
+	cidSet := cid.NewSet()
+	cidSet.Add(nd.Cid())
+
 	// write data
 	// write root node
 	if err := carutil.LdWrite(w, nd.Cid().Bytes(), nd.RawData()); err != nil {
@@ -71,9 +75,13 @@ func (b *BatchBuilder) Write(root cid.Cid, w io.Writer, batchNum int) (uint64, e
 	carSize += carutil.LdSize(nd.Cid().Bytes(), nd.RawData())
 	//fmt.Printf("cid: %s\n", nd.Cid())
 	if err := BlockWalk(b.ctx, nd, b.bs, batchNum, func(node format.Node) error {
+		if cidSet.Has(node.Cid()) {
+			return nil
+		}
 		if err := carutil.LdWrite(w, node.Cid().Bytes(), node.RawData()); err != nil {
 			return err
 		}
+		cidSet.Add(node.Cid())
 		carSize += carutil.LdSize(nd.Cid().Bytes(), nd.RawData())
 		//fmt.Printf("cid: %s\n", node.Cid())
 		return nil
