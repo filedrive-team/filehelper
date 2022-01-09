@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/filecoin-project/go-padreader v0.0.1
 	github.com/filedrive-team/go-ds-cluster v0.0.6
+	github.com/fxamacker/cbor/v2 v2.4.0
 	github.com/ipfs/go-block-format v0.0.3
 	github.com/ipfs/go-blockservice v0.1.7
 	github.com/ipfs/go-cid v0.1.0

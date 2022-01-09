@@ -3,6 +3,7 @@ package carv1
 import (
 	"fmt"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
 	gocar "github.com/ipld/go-car"
@@ -85,4 +86,13 @@ type DataRef struct {
 	Type   RefType
 	Blocks []cid.Cid
 	Block  cid.Cid
+}
+
+func (cr *Carv1Ref) Encode() ([]byte, error) {
+	return cbor.Marshal(cr)
+}
+
+func DecodeCarv1Ref(data []byte) (ref *Carv1Ref, err error) {
+	err = cbor.Unmarshal(data, ref)
+	return
 }
