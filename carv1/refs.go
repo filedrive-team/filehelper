@@ -39,7 +39,7 @@ func (b *BatchBuilder) Ref(root cid.Cid, batchNum int) (*Carv1Ref, error) {
 		Offset: offset,
 		Size:   hz,
 		Type:   RefHeader,
-		Blocks: []cid.Cid{root},
+		Blocks: []string{root.String()},
 	})
 	offset += hz
 	// set cid set to only save uniq cid to car file
@@ -53,7 +53,7 @@ func (b *BatchBuilder) Ref(root cid.Cid, batchNum int) (*Carv1Ref, error) {
 		Offset: offset,
 		Size:   rootSize,
 		Type:   RefData,
-		Block:  root,
+		Block:  root.String(),
 	})
 	offset += rootSize
 	//fmt.Printf("cid: %s\n", nd.Cid())
@@ -69,7 +69,7 @@ func (b *BatchBuilder) Ref(root cid.Cid, batchNum int) (*Carv1Ref, error) {
 			Offset: bsize,
 			Size:   bsize,
 			Type:   RefData,
-			Block:  node.Cid(),
+			Block:  node.Cid().String(),
 		})
 		offset += bsize
 		return nil
@@ -91,8 +91,8 @@ type DataRef struct {
 	Offset uint64
 	Size   uint64
 	Type   RefType
-	Blocks []cid.Cid
-	Block  cid.Cid
+	Blocks []string
+	Block  string
 }
 
 func (cr *Carv1Ref) Encode() ([]byte, error) {
