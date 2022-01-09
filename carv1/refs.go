@@ -1,0 +1,88 @@
+package carv1
+
+import (
+	"fmt"
+
+	"github.com/ipfs/go-cid"
+	format "github.com/ipfs/go-ipld-format"
+	gocar "github.com/ipld/go-car"
+	carutil "github.com/ipld/go-car/util"
+)
+
+type RefType int8
+
+const (
+	RefHeader RefType = iota
+	RefData
+)
+
+func (b *BatchBuilder) Ref(root cid.Cid, batchNum int) (*Carv1Ref, error) {
+	nd, err := b.bs.Get(b.ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	ref := &Carv1Ref{}
+	ref.DataRef = make([]*DataRef, 0)
+
+	h := &gocar.CarHeader{
+		Roots:   []cid.Cid{root},
+		Version: 1,
+	}
+	hz, err := gocar.HeaderSize(h)
+	if err != nil {
+		return nil, err
+	}
+	ref.Size += hz
+	ref.DataRef = append(ref.DataRef, &DataRef{
+		Size:   hz,
+		Type:   RefHeader,
+		Blocks: []cid.Cid{root},
+	})
+
+	// set cid set to only save uniq cid to car file
+	cidSet := cid.NewSet()
+	cidSet.Add(nd.Cid())
+
+	// ref root node
+	rootSize := carutil.LdSize(nd.Cid().Bytes(), nd.RawData())
+	ref.Size += rootSize
+	ref.DataRef = append(ref.DataRef, &DataRef{
+		Size:  rootSize,
+		Type:  RefData,
+		Block: root,
+	})
+	//fmt.Printf("cid: %s\n", nd.Cid())
+	if err := BlockWalk(b.ctx, nd, b.bs, batchNum, func(node format.Node) error {
+		if cidSet.Has(node.Cid()) {
+			return nil
+		}
+
+		cidSet.Add(node.Cid())
+		bsize := carutil.LdSize(node.Cid().Bytes(), node.RawData())
+		ref.Size += bsize
+		ref.DataRef = append(ref.DataRef, &DataRef{
+			Size:  bsize,
+			Type:  RefData,
+			Block: node.Cid(),
+		})
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("car file size: %d\n", ref.Size)
+
+	return ref, nil
+}
+
+type Carv1Ref struct {
+	Size    uint64
+	DataRef []*DataRef
+}
+
+type DataRef struct {
+	Size   uint64
+	Type   RefType
+	Blocks []cid.Cid
+	Block  cid.Cid
+}
