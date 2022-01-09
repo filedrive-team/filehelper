@@ -100,6 +100,7 @@ func (cr *Carv1Ref) Encode() ([]byte, error) {
 }
 
 func DecodeCarv1Ref(data []byte) (ref *Carv1Ref, err error) {
+	ref = &Carv1Ref{}
 	err = cbor.Unmarshal(data, ref)
 	return
 }
