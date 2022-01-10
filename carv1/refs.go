@@ -24,7 +24,6 @@ func (b *BatchBuilder) Ref(root cid.Cid, batchNum int) (*Carv1Ref, error) {
 	}
 	ref := &Carv1Ref{}
 	ref.DataRef = make([]*DataRef, 0)
-	var offset uint64
 
 	h := &gocar.CarHeader{
 		Roots:   []cid.Cid{root},
@@ -34,28 +33,29 @@ func (b *BatchBuilder) Ref(root cid.Cid, batchNum int) (*Carv1Ref, error) {
 	if err != nil {
 		return nil, err
 	}
-	ref.Size += hz
+
 	ref.DataRef = append(ref.DataRef, &DataRef{
-		Offset: offset,
 		Size:   hz,
 		Type:   RefHeader,
 		Blocks: []string{root.String()},
 	})
-	offset += hz
+	ref.Size += hz
+
 	// set cid set to only save uniq cid to car file
 	cidSet := cid.NewSet()
 	cidSet.Add(nd.Cid())
 
 	// ref root node
 	rootSize := carutil.LdSize(nd.Cid().Bytes(), nd.RawData())
-	ref.Size += rootSize
+
 	ref.DataRef = append(ref.DataRef, &DataRef{
-		Offset: offset,
+		Offset: ref.Size,
 		Size:   rootSize,
 		Type:   RefData,
 		Block:  root.String(),
 	})
-	offset += rootSize
+	ref.Size += rootSize
+
 	//fmt.Printf("cid: %s\n", nd.Cid())
 	if err := BlockWalk(b.ctx, nd, b.bs, batchNum, func(node format.Node) error {
 		if cidSet.Has(node.Cid()) {
@@ -64,14 +64,14 @@ func (b *BatchBuilder) Ref(root cid.Cid, batchNum int) (*Carv1Ref, error) {
 
 		cidSet.Add(node.Cid())
 		bsize := carutil.LdSize(node.Cid().Bytes(), node.RawData())
-		ref.Size += bsize
+
 		ref.DataRef = append(ref.DataRef, &DataRef{
-			Offset: bsize,
+			Offset: ref.Size,
 			Size:   bsize,
 			Type:   RefData,
 			Block:  node.Cid().String(),
 		})
-		offset += bsize
+		ref.Size += bsize
 		return nil
 	}); err != nil {
 		return nil, err

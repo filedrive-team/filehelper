@@ -157,3 +157,35 @@ func (w *sw) Write(p []byte) (n int, err error) {
 func (w *sw) N() uint64 {
 	return w.n
 }
+
+type onlineng struct {
+	ng format.DAGService
+}
+
+func (ng *onlineng) Get(ctx context.Context, cid cid.Cid) (format.Node, error) {
+	return ng.ng.Get(ctx, cid)
+}
+
+func (ng *onlineng) GetMany(ctx context.Context, cids []cid.Cid) <-chan *format.NodeOption {
+	return ng.ng.GetMany(ctx, cids)
+}
+
+func NewOnlineNodeGetter(ng format.DAGService) *onlineng {
+	return &onlineng{ng}
+}
+
+type offlineng struct {
+	ng blockstore.Blockstore
+}
+
+func (ng *offlineng) Get(ctx context.Context, cid cid.Cid) (format.Node, error) {
+	return GetNode(ctx, cid, ng.ng)
+}
+
+func (ng *offlineng) GetMany(ctx context.Context, cids []cid.Cid) <-chan *format.NodeOption {
+	return nil
+}
+
+func NewOfflineNodeGetter(ng blockstore.Blockstore) *offlineng {
+	return &offlineng{ng}
+}
