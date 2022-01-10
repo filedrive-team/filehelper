@@ -72,6 +72,8 @@ func Import(ctx context.Context, target, dsclusterCfg string, parallel, batchRea
 	}
 
 	var total_files = 0
+	var total_size uint64
+	var importedSize uint64
 	go func() {
 		filepath.Walk(target, func(_ string, fi os.FileInfo, err error) error {
 			if err != nil {
@@ -82,6 +84,7 @@ func Import(ctx context.Context, target, dsclusterCfg string, parallel, batchRea
 			}
 			if !fi.IsDir() && fi.Name() != record_json {
 				total_files += 1
+				total_size += uint64(fi.Size())
 			}
 			return nil
 		})
@@ -126,8 +129,10 @@ func Import(ctx context.Context, target, dsclusterCfg string, parallel, batchRea
 				Size: item.Info.Size(),
 				CID:  fileNodeCid.String(),
 			}
-			if total_files > 0 {
+			importedSize += uint64(item.Info.Size())
+			if total_size > 0 {
 				fmt.Printf("total %d files, imported %d files, %.2f %%\n", total_files, len(records), float64(len(records))/float64(total_files)*100)
+				fmt.Printf("total size: %d, imported size: %d, %.2f %%\n", total_size, importedSize, float64(importedSize)/float64(total_size)*100)
 			}
 		}(item)
 	}
