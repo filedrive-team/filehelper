@@ -6,7 +6,6 @@ require (
 	github.com/filecoin-project/go-padreader v0.0.1
 	github.com/fxamacker/cbor/v2 v2.4.0
 	github.com/gopherjs/gopherjs v0.0.0-20190812055157-5d271430af9f // indirect
-	github.com/ipfs/go-block-format v0.0.3
 	github.com/ipfs/go-cid v0.1.0
 	github.com/ipfs/go-ipfs-blockstore v1.0.4
 	github.com/ipfs/go-ipfs-chunker v0.0.5
