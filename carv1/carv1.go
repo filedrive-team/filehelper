@@ -95,7 +95,7 @@ func (b *BatchBuilder) Write(root cid.Cid, w io.Writer, batchNum int) (uint64, e
 }
 
 func GetNode(ctx context.Context, cid cid.Cid, bs blockstore.Blockstore) (format.Node, error) {
-	nd, err := bs.Get(cid)
+	nd, err := bs.Get(ctx, cid)
 	if err != nil {
 		return nil, err
 	}
