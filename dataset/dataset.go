@@ -8,7 +8,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/filedrive-team/filehelper"
 	"github.com/filedrive-team/filehelper/importer"
@@ -19,9 +21,11 @@ import (
 	ipld "github.com/ipfs/go-ipld-format"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-merkledag"
+	"golang.org/x/xerrors"
 )
 
 const record_json = "record.json"
+const record_csv = "record.csv"
 
 type MetaData struct {
 	Path string `json:"path"`
@@ -32,59 +36,77 @@ type MetaData struct {
 
 var log = logging.Logger("filehelper/dataset")
 
-func Import(ctx context.Context, target string, bs bstore.Blockstore, cidBuilder cid.Prefix, parallel, batchReadNum int) error {
-	recordPath := path.Join(target, record_json)
+func Import(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, parallel, batchReadNum int, prefix, recordDir string, targets []string) error {
+	// checkout if record dir exists
+	rdinfo, err := os.Stat(recordDir)
+	if err != nil {
+		return err
+	}
+	if !rdinfo.IsDir() {
+		return xerrors.New("record dir is not a dir!")
+	}
+
+	recordPath := path.Join(recordDir, record_json)
 	// check if record.json has data
 	records, err := readRecords(recordPath)
 	if err != nil {
 		return err
 	}
-	// var ds ds.Datastore
+	// set up a goroutine to receive csv record line by line
+	recordCSVPath := path.Join(recordDir, record_csv)
+	csvChan := make(chan string)
+	defer close(csvChan)
+	go func(ctx context.Context, csvPath string, csvChan chan string) {
+		f, err := os.OpenFile(csvPath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+		if err != nil {
+			// if we failed to open file handle then quit import should be a better choice
+			panic(err)
+		}
+		defer f.Close()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case record := <-csvChan:
+				if record == "" { // chan closed
+					return
+				}
+				if _, err := f.WriteString(record); err != nil {
+					log.Error(err)
+				}
+			}
+		}
 
-	// cfg, err := clustercfg.ReadConfig(dsclusterCfg)
-	// if err != nil {
-	// 	return err
-	// }
-	// ds, err = clusterclient.NewClusterClient(context.Background(), cfg)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// ds = dsmount.New([]dsmount.Mount{
-	// 	{
-	// 		Prefix:    bstore.BlockPrefix,
-	// 		Datastore: ds,
-	// 	},
-	// })
-
-	// bs := bstore.NewBlockstore(ds.(*dsmount.Datastore))
+	}(ctx, recordCSVPath, csvChan)
 
 	dagServ := merkledag.NewDAGService(blockservice.New(bs, offline.Exchange(bs)))
 
-	var total_files = 0
+	var total_files uint64 = 0
 	var total_size uint64
 	var importedSize uint64
 	go func() {
-		filepath.Walk(target, func(_ string, fi os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if fi.Size() == 0 {
+		for _, target := range targets {
+			filepath.Walk(target, func(_ string, fi os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if fi.Size() == 0 {
+					return nil
+				}
+				if !fi.IsDir() {
+					total_files += 1
+					total_size += uint64(fi.Size())
+				}
 				return nil
-			}
-			if !fi.IsDir() && fi.Name() != record_json {
-				total_files += 1
-				total_size += uint64(fi.Size())
-			}
-			return nil
-		})
+			})
+		}
 	}()
 
 	pchan := make(chan struct{}, parallel)
 	wg := sync.WaitGroup{}
 	lock := sync.RWMutex{}
 	var ferr error
-	files := filehelper.FileWalkAsync([]string{target})
+	files := filehelper.FileWalkAsync(targets)
 	for item := range files {
 		wg.Add(1)
 		go func(item filehelper.Finfo) {
@@ -93,8 +115,8 @@ func Import(ctx context.Context, target string, bs bstore.Blockstore, cidBuilder
 				wg.Done()
 			}()
 			pchan <- struct{}{}
-			// ignore record_json
-			if item.Name == record_json || item.Info.Size() == 0 {
+
+			if item.Info.Size() == 0 {
 				return
 			}
 
@@ -119,11 +141,14 @@ func Import(ctx context.Context, target string, bs bstore.Blockstore, cidBuilder
 				Size: item.Info.Size(),
 				CID:  fileNodeCid.String(),
 			}
-			importedSize += uint64(item.Info.Size())
+
+			atomic.AddUint64(&importedSize, uint64(item.Info.Size()))
+
 			if total_size > 0 {
 				fmt.Printf("total %d files, imported %d files, %.2f %%\n", total_files, len(records), float64(len(records))/float64(total_files)*100)
 				fmt.Printf("total size: %d, imported size: %d, %.2f %%\n", total_size, importedSize, float64(importedSize)/float64(total_size)*100)
 			}
+			csvChan <- fmt.Sprintf("%s,%s,%d\n", strings.TrimPrefix(item.Path, prefix), fileNodeCid.String(), item.Info.Size())
 		}(item)
 	}
 	wg.Wait()
