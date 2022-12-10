@@ -119,9 +119,14 @@ func BlockWalk(ctx context.Context, node format.Node, bs format.NodeGetter, batc
 				wg.Done()
 			}()
 			batchchan <- struct{}{}
-			nd, err := bs.Get(ctx, link.Cid)
+			var nd format.Node
+			var err error
+			nd, err = bs.Get(ctx, link.Cid)
 			if err != nil {
-				errmsg = append(errmsg, err.Error())
+				// try get one more time
+				if nd, err = bs.Get(ctx, link.Cid); err != nil {
+					errmsg = append(errmsg, err.Error())
+				}
 			}
 			loadedNode[i] = nd
 		}(ctx, i, link, bs)
