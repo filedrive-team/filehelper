@@ -138,12 +138,10 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 					return
 				case d := <-fileDownloaderChan:
 					if d.Done {
-						// delete(downloaderRecord, d.Url)
+						delete(downloaderRecord, d.Url)
 					} else {
 						downloaderRecord[d.Url] = &d
 					}
-
-					saveDownloader(downloaderRecord, recordErrorPath)
 
 				case record := <-csvChan:
 					if record == "" { // chan closed
@@ -227,7 +225,7 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 				importedFiles += 1
 
 				if totalSize > 0 {
-					fmt.Printf("total %d files, imported %d files, %.2f %%\n", totalFiles, len(records), float64(importedFiles)/float64(totalFiles)*100)
+					fmt.Printf("total %d files, imported %d files, %.2f %%\n", totalFiles, importedFiles, float64(importedFiles)/float64(totalFiles)*100)
 					fmt.Printf("total size: %d, imported size: %d, %.2f %%\n", totalSize, importedSize, float64(importedSize)/float64(totalSize)*100)
 				}
 				if i, err := strconv.Atoi(v[3]); err == nil {
