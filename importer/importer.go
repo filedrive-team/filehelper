@@ -253,9 +253,7 @@ lab:
 	return ciid, nil
 }
 
-// Todos:
-//  read more bytes and parallel the dags save work
-func BalanceNodeV1(ctx context.Context, f io.Reader, fsize int64, bufDs format.DAGService, cidBuilder cid.Builder, batchReadNum int) ([]*LinkAndSize, error) {
+func BuildFileLinks(ctx context.Context, f io.Reader, fsize int64, bufDs format.DAGService, cidBuilder cid.Builder, batchReadNum int) ([]*LinkAndSize, error) {
 	if fsize == 0 {
 		return nil, fmt.Errorf("file size should not be zero")
 	}
@@ -288,7 +286,6 @@ func BalanceNodeV1(ctx context.Context, f io.Reader, fsize int64, bufDs format.D
 			for _, idxbuf := range rd {
 				go func(ib *Idxbuf) {
 					defer wg.Done()
-					//fmt.Printf("id: %d, size: %d\n", ib.Idx, len(ib.Buf))
 					dag, err := NewDagWithData(ib.Buf, pb.Data_File, cidBuilder)
 					if err != nil {
 						errchan <- err
@@ -332,13 +329,7 @@ lab:
 		if l == nil {
 			return nil, fmt.Errorf("unexpected data links")
 		}
-		//log.Infof("index: %d, bytes len: %d", i, l.FileSize)
-
 	}
-	// ciid, err := BuildCidByLinks(ctx, dataLinks, bufDs)
-	// if err != nil {
-	// 	return cid.Undef, err
-	// }
 	return dataLinks, nil
 }
 

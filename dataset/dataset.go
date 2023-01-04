@@ -44,8 +44,7 @@ type MetaData struct {
 
 var log = logging.Logger("filehelper/dataset")
 
-// Bucket,Region,Key,Size,
-func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, parallel, batchReadNum int, recordDir string, targets []string) error {
+func ImportAWSDataset(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, parallel, batchReadNum int, recordDir string, targets []string) error {
 	// checkout if record dir exists
 	rdinfo, err := os.Stat(recordDir)
 	if err != nil {
@@ -61,15 +60,17 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 	var totalSize uint64
 	var importedSize uint64
 	var importedFiles uint64
+
+	// count tasks and executed tasks
 	go func() {
 		for _, target := range targets {
 			recordCSVPath := path.Join(recordDir, path.Base(target))
 			data := filehelper.ReadCsv(target)
 			recordData := filehelper.ReadCsvNoTitle(recordCSVPath)
-			importedFiles = uint64(len(recordData))
 			for _, v := range recordData {
 				if i, err := strconv.Atoi(v[2]); err == nil {
 					importedSize += uint64(i)
+					importedFiles += 1
 				}
 			}
 			for _, v := range data {
@@ -85,12 +86,12 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 	wg := sync.WaitGroup{}
 	lock := sync.RWMutex{}
 	var ferr error
+	shutdownCount := 0
 
 	for _, target := range targets {
 		csvChan := make(chan string)
 		fileDownloaderChan := make(chan FileDownloader)
 		fileDownloaderErrorChan := make(chan struct{})
-
 		shutdownChan := make(chan os.Signal)
 
 		signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
@@ -103,7 +104,9 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 
 		recordPath := path.Join(recordDir, fileprefix+".json")
 		recordErrorPath := path.Join(recordDir, fileprefix+"error.json")
+		// read the downloader recorded when the error occurred and download it again
 		downloaderRecord, err := readDownloader(recordErrorPath)
+
 		if err != nil {
 			return err
 		}
@@ -129,12 +132,14 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 				case <-shutdownChan:
 					saveRecords(records, recordPath)
 					saveDownloader(downloaderRecord, recordErrorPath)
-					os.Exit(1)
+					shutdownCount += 1
+					if shutdownCount == len(targets) {
+						os.Exit(1)
+					}
 				case <-fileDownloaderErrorChan:
 					saveRecords(records, recordPath)
 					saveDownloader(downloaderRecord, recordErrorPath)
 				case <-ctx.Done():
-					fmt.Println("=====ctx.Done===")
 					return
 				case d := <-fileDownloaderChan:
 					if d.Done {
@@ -184,7 +189,7 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 
 				fileTotalSize, err := d.getHeaderInfo()
 				if err != nil {
-					fmt.Printf("==get header info error:==%+v", err)
+					fmt.Printf("\nget header info error:%+v\n", err)
 					return
 				}
 
@@ -196,12 +201,12 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 						break
 					}
 					err = d.runDownload(ctx, dagServ, cidBuilder, batchReadNum)
+					d.Done = false
+					fileDownloaderChan <- *d
 					if err != nil {
 						fileDownloaderErrorChan <- struct{}{}
 						return
 					}
-					d.Done = false
-					fileDownloaderChan <- *d
 				}
 
 				cid, err := importer.BuildCidByLinks(ctx, d.DataLinks, dagServ)
@@ -225,8 +230,14 @@ func ImportV1(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.Prefix, 
 				importedFiles += 1
 
 				if totalSize > 0 {
-					fmt.Printf("total %d files, imported %d files, %.2f %%\n", totalFiles, importedFiles, float64(importedFiles)/float64(totalFiles)*100)
-					fmt.Printf("total size: %d, imported size: %d, %.2f %%\n", totalSize, importedSize, float64(importedSize)/float64(totalSize)*100)
+					fmt.Printf("\rtotal %d files, imported %d files, %.2f %% total size: %d, imported size: %d, %.2f %%",
+						totalFiles,
+						importedFiles,
+						float64(importedFiles)/float64(totalFiles)*100,
+						totalSize,
+						importedSize,
+						float64(importedSize)/float64(totalSize)*100,
+					)
 				}
 				if i, err := strconv.Atoi(v[3]); err == nil {
 					csvChan <- fmt.Sprintf("%s,%s,%d\n", v[2], cid.String(), i)
@@ -262,7 +273,7 @@ func (d *FileDownloader) getHeaderInfo() (int, error) {
 	}
 
 	if resp.Header.Get("Accept-Ranges") != "bytes" {
-		return 0, errors.New("服务器不支持文件断点续传")
+		return 0, errors.New("the server does not support file breakpoints to continue download")
 	}
 
 	outputFileName, err := parseFileInfo(resp)
@@ -292,21 +303,10 @@ func parseFileInfo(resp *http.Response) (string, error) {
 
 func (d *FileDownloader) runDownload(ctx context.Context, dagServ format.DAGService, cidBuilder cid.Builder, batchReadNum int) error {
 
-	_filepath := fmt.Sprintf("download/%d_%s", d.RangIndex, d.OutputFileName)
-
-	fileDir := filepath.Dir(_filepath)
-
-	err := os.MkdirAll(fileDir, 0666)
-	if err != nil {
-		return err
-	}
-
 	headers := map[string]string{}
 	size := importer.UnixfsChunkSize * uint64(batchReadNum)
 	rangEnd := d.RangStart + (int(size) - 1)
-	if err == nil {
-		headers["Range"] = fmt.Sprintf("bytes=%v-%v", d.RangStart, rangEnd)
-	}
+	headers["Range"] = fmt.Sprintf("bytes=%v-%v", d.RangStart, rangEnd)
 
 	r, err := getNewRequest(d.Url, "GET", headers)
 	if err != nil {
@@ -314,7 +314,7 @@ func (d *FileDownloader) runDownload(ctx context.Context, dagServ format.DAGServ
 	}
 
 	client := retryablehttp.NewClient()
-	client.RetryMax = 1
+	client.RetryMax = 5
 	client.Logger = nil
 	resp, err := client.Do(r)
 	if err != nil {
@@ -325,7 +325,7 @@ func (d *FileDownloader) runDownload(ctx context.Context, dagServ format.DAGServ
 	}
 	defer resp.Body.Close()
 
-	dataLinks, err := importer.BalanceNodeV1(ctx, resp.Body, resp.ContentLength, dagServ, cidBuilder, batchReadNum)
+	dataLinks, err := importer.BuildFileLinks(ctx, resp.Body, resp.ContentLength, dagServ, cidBuilder, batchReadNum)
 	if err != nil {
 		return err
 	}
