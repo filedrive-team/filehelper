@@ -74,7 +74,7 @@ func ImportAWSDataset(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.
 				}
 			}
 			for _, v := range data {
-				if i, err := strconv.Atoi(v[3]); err == nil {
+				if i, err := strconv.Atoi(v[2]); err == nil {
 					totalFiles += 1
 					totalSize += uint64(i)
 				}
@@ -174,7 +174,7 @@ func ImportAWSDataset(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.
 				}()
 				pchan <- struct{}{}
 
-				url := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v", v[0], v[1], v[2])
+				url := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v", v[0], v[1], v[3])
 
 				// ignore file which has been imported
 				lock.RLock()
@@ -217,11 +217,11 @@ func ImportAWSDataset(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.
 
 				lock.Lock()
 				defer lock.Unlock()
-				if i, err := strconv.Atoi(v[3]); err == nil {
+				if i, err := strconv.Atoi(v[2]); err == nil {
 					atomic.AddUint64(&importedSize, uint64(i))
-					records[v[2]] = &MetaData{
+					records[v[3]] = &MetaData{
 						Name: v[0],
-						Path: v[2],
+						Path: v[3],
 						Size: int64(i),
 						CID:  cid.String(),
 					}
@@ -239,8 +239,8 @@ func ImportAWSDataset(ctx context.Context, bs bstore.Blockstore, cidBuilder cid.
 						float64(importedSize)/float64(totalSize)*100,
 					)
 				}
-				if i, err := strconv.Atoi(v[3]); err == nil {
-					csvChan <- fmt.Sprintf("%s,%s,%d\n", v[2], cid.String(), i)
+				if i, err := strconv.Atoi(v[2]); err == nil {
+					csvChan <- fmt.Sprintf("%s,%s,%d\n", v[3], cid.String(), i)
 				}
 
 				if len(data) == len(records) {
