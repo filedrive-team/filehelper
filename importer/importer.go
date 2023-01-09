@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"sync"
@@ -21,7 +22,7 @@ const UnixfsChunkSize uint64 = 1 << 20
 
 var log = logging.Logger("filejoy-node-impl")
 
-type linkAndSize struct {
+type LinkAndSize struct {
 	Link     *format.Link
 	FileSize uint64
 }
@@ -88,9 +89,9 @@ func (n *FSNodeOverDag) Commit() (format.Node, error) {
 	return n.dag, nil
 }
 
-func buildCidByLinks(ctx context.Context, links []*linkAndSize, dagServ format.DAGService) (cid.Cid, error) {
+func BuildCidByLinks(ctx context.Context, links []*LinkAndSize, dagServ format.DAGService) (cid.Cid, error) {
 	maxLinkNum := UnixfsLinksPerLevel
-	var linkList = make([]*linkAndSize, 0)
+	var linkList = make([]*LinkAndSize, 0)
 	var needAdd = make([]format.Node, 0)
 
 	// cidbuilder
@@ -118,7 +119,7 @@ func buildCidByLinks(ctx context.Context, links []*linkAndSize, dagServ format.D
 				if err != nil {
 					return cid.Undef, err
 				}
-				linkList = append(linkList, &linkAndSize{
+				linkList = append(linkList, &LinkAndSize{
 					Link:     link,
 					FileSize: od.file.FileSize(),
 				})
@@ -147,13 +148,13 @@ func buildCidByLinks(ctx context.Context, links []*linkAndSize, dagServ format.D
 			if err != nil {
 				return cid.Undef, err
 			}
-			linkList = append(linkList, &linkAndSize{
+			linkList = append(linkList, &LinkAndSize{
 				Link:     link,
 				FileSize: od.file.FileSize(),
 			})
 		}
 		links = linkList
-		linkList = make([]*linkAndSize, 0)
+		linkList = make([]*LinkAndSize, 0)
 	}
 
 	if len(needAdd) > 0 {
@@ -172,7 +173,7 @@ func BalanceNode(ctx context.Context, f io.Reader, fsize int64, bufDs format.DAG
 		return cid.Undef, xerrors.Errorf("file size should not be zero")
 	}
 	cker := NewBatchSplitter(f, int64(UnixfsChunkSize), batchReadNum)
-	dataLinks := make([]*linkAndSize, dataLinkNum(fsize, int64(UnixfsChunkSize)))
+	dataLinks := make([]*LinkAndSize, dataLinkNum(fsize, int64(UnixfsChunkSize)))
 	errchan := make(chan error)
 	finishedchan := make(chan struct{})
 	linkchan := make(chan IdxLink)
@@ -232,7 +233,7 @@ lab:
 		case <-finishedchan:
 			break lab
 		case lk := <-linkchan:
-			dataLinks[lk.Idx] = &linkAndSize{
+			dataLinks[lk.Idx] = &LinkAndSize{
 				Link:     lk.Link,
 				FileSize: lk.FileSize,
 			}
@@ -245,11 +246,91 @@ lab:
 		//log.Infof("index: %d, bytes len: %d", i, l.FileSize)
 
 	}
-	ciid, err := buildCidByLinks(ctx, dataLinks, bufDs)
+	ciid, err := BuildCidByLinks(ctx, dataLinks, bufDs)
 	if err != nil {
 		return cid.Undef, err
 	}
 	return ciid, nil
+}
+
+func BuildFileLinks(ctx context.Context, f io.Reader, fsize int64, bufDs format.DAGService, cidBuilder cid.Builder, batchReadNum int) ([]*LinkAndSize, error) {
+	if fsize == 0 {
+		return nil, fmt.Errorf("file size should not be zero")
+	}
+	cker := NewBatchSplitter(f, int64(UnixfsChunkSize), batchReadNum)
+	dataLinks := make([]*LinkAndSize, dataLinkNum(fsize, int64(UnixfsChunkSize)))
+	errchan := make(chan error)
+	finishedchan := make(chan struct{})
+	linkchan := make(chan IdxLink)
+	go func(linkchan chan IdxLink, finishedchan chan struct{}, errchan chan error) {
+		for {
+			select {
+			case <-ctx.Done():
+				errchan <- ctx.Err()
+				return
+			default:
+			}
+
+			rd, err := cker.NextBytes()
+			if err == io.EOF {
+				finishedchan <- struct{}{}
+				return
+			}
+			if err != nil {
+				errchan <- err
+				return
+			}
+
+			wg := sync.WaitGroup{}
+			wg.Add(len(rd))
+			for _, idxbuf := range rd {
+				go func(ib *Idxbuf) {
+					defer wg.Done()
+					dag, err := NewDagWithData(ib.Buf, pb.Data_File, cidBuilder)
+					if err != nil {
+						errchan <- err
+						return
+					}
+					if err = bufDs.Add(ctx, dag); err != nil {
+						errchan <- err
+						return
+					}
+					link, err := format.MakeLink(dag)
+					if err != nil {
+						errchan <- err
+						return
+					}
+					linkchan <- IdxLink{
+						Idx:      ib.Idx,
+						Link:     link,
+						FileSize: uint64(len(ib.Buf)),
+					}
+				}(idxbuf)
+			}
+			wg.Wait()
+		}
+
+	}(linkchan, finishedchan, errchan)
+lab:
+	for {
+		select {
+		case err := <-errchan:
+			return nil, err
+		case <-finishedchan:
+			break lab
+		case lk := <-linkchan:
+			dataLinks[lk.Idx] = &LinkAndSize{
+				Link:     lk.Link,
+				FileSize: lk.FileSize,
+			}
+		}
+	}
+	for _, l := range dataLinks {
+		if l == nil {
+			return nil, fmt.Errorf("unexpected data links")
+		}
+	}
+	return dataLinks, nil
 }
 
 func dataLinkNum(size, chunksize int64) int {
