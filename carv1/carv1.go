@@ -99,7 +99,8 @@ func GetNode(ctx context.Context, cid cid.Cid, bs blockstore.Blockstore) (format
 	if err != nil {
 		return nil, err
 	}
-	return legacy.DecodeNode(ctx, nd)
+
+	return legacy.NewDecoder().DecodeNode(ctx, nd)
 }
 
 func BlockWalk(ctx context.Context, node format.Node, bs format.NodeGetter, batchNum int, cb func(nd format.Node) error) error {
